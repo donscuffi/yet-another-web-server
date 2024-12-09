@@ -1,33 +1,45 @@
 package main
 
 import (
-	"fmt"
+	"github.com/labstack/echo/v4"
 	"net/http"
-	"strconv"
 )
 
-var counter int
-
-func GetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		fmt.Fprintln(w, "counter is", strconv.Itoa(counter))
-	} else {
-		fmt.Fprintln(w, "Method GET allowed only")
-	}
+type Message struct {
+	Text string `json:"text"`
 }
 
-func PostHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		counter++
-		fmt.Fprintln(w, "counter increased by 1")
-	} else {
-		fmt.Fprintln(w, "Method POST allowed only")
+type Response struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+var messages []Message
+
+func GetHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, &messages)
+}
+
+func PostHandler(c echo.Context) error {
+	var message Message
+	if err := c.Bind(&message); err != nil {
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  "Error",
+			Message: "Could not add the message",
+		})
 	}
+	messages = append(messages, message)
+	return c.JSON(http.StatusCreated, Response{
+		Status:  "Success",
+		Message: "Added the message",
+	})
 }
 
 func main() {
-	http.HandleFunc("/get", GetHandler)
-	http.HandleFunc("/post", PostHandler)
+	e := echo.New()
 
-	http.ListenAndServe("localhost:8080", nil)
+	e.GET("/messages", GetHandler)
+	e.POST("/messages", PostHandler)
+
+	e.Start(":8080")
 }
