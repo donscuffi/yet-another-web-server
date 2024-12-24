@@ -2,6 +2,9 @@ package main
 
 import (
 	"github.com/labstack/echo/v4"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -16,17 +19,30 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-var messages = make(map[int]Message)
-var nextID = 1
+var db *gorm.DB
 
-func GetHandler(c echo.Context) error {
-	var msgSlice []Message
-
-	for _, msg := range messages {
-		msgSlice = append(msgSlice, msg)
+func initDB() {
+	dsn := "host=localhost user=postgres password=yourpassword dbname=postgres sslmode=disable"
+	var err error
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v", err)
 	}
 
-	return c.JSON(http.StatusOK, &msgSlice)
+	db.AutoMigrate(&Message{})
+}
+
+func GetHandler(c echo.Context) error {
+	var messages []Message
+
+	if err := db.Find(&messages).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  "Error",
+			Message: "Could not find the messages",
+		})
+	}
+
+	return c.JSON(http.StatusOK, &messages)
 }
 
 func PostHandler(c echo.Context) error {
@@ -38,14 +54,16 @@ func PostHandler(c echo.Context) error {
 		})
 	}
 
-	message.ID = nextID
-	nextID++
-
-	messages[message.ID] = message
+	if err := db.Create(&message).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  "Error",
+			Message: "Could not create the message",
+		})
+	}
 
 	return c.JSON(http.StatusCreated, Response{
 		Status:  "Success",
-		Message: "Added the message",
+		Message: "The message has been created",
 	})
 }
 
@@ -63,19 +81,16 @@ func PatchHandler(c echo.Context) error {
 	if err := c.Bind(&updatedMessage); err != nil {
 		return c.JSON(http.StatusBadRequest, Response{
 			Status:  "Error",
+			Message: "Invalid input",
+		})
+	}
+
+	if err := db.Model(&Message{}).Where("id = ?", id).Update("text", updatedMessage.Text).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, Response{
+			Status:  "Error",
 			Message: "Could not update the message",
 		})
 	}
-
-	if _, exists := messages[id]; !exists {
-		return c.JSON(http.StatusConflict, Response{
-			Status:  "Error",
-			Message: "Message was not found",
-		})
-	}
-
-	updatedMessage.ID = id
-	messages[id] = updatedMessage
 
 	return c.JSON(http.StatusOK, Response{
 		Status:  "Success",
@@ -93,14 +108,12 @@ func DeleteHandler(c echo.Context) error {
 		})
 	}
 
-	if _, exists := messages[id]; !exists {
-		return c.JSON(http.StatusConflict, Response{
+	if err := db.Delete(&Message{}, id).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, Response{
 			Status:  "Error",
-			Message: "Message was not found",
+			Message: "Could not delete the message",
 		})
 	}
-
-	delete(messages, id)
 
 	return c.JSON(http.StatusOK, Response{
 		Status:  "Success",
@@ -109,6 +122,7 @@ func DeleteHandler(c echo.Context) error {
 }
 
 func main() {
+	initDB()
 	e := echo.New()
 
 	e.GET("/messages", GetHandler)
